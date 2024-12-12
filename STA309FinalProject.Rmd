@@ -1,0 +1,393 @@
+---
+title: "STA 309 Final Exam"
+author: "Ellie Miller"
+date: "2024-12-7"
+output: html_document
+runtime: shiny
+---
+
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(caret)
+library(knitr)
+library(kableExtra)
+library(shiny) # Learned in STA 404
+library(shinythemes) # Learned in STA 404
+library(reshape2) # Learned in STA 404
+
+```
+
+
+```{r}
+diabetes_data <- read.csv("diabetes_data.csv")
+```
+
+
+```{r}
+diabetes_data <- diabetes_data %>%
+  mutate(gender = as.factor(gender)) %>%
+  mutate(hypertension = as.factor(hypertension)) %>%
+  mutate(heart_disease = as.factor(heart_disease)) %>%
+  mutate(smoking_history = as.factor(smoking_history)) %>%
+  mutate(diabetes = as.factor(diabetes))
+glimpse(diabetes_data)
+```
+
+
+### Data Partitioning 
+
+### Training and Test Sets
+
+```{r}
+set.seed(123)
+trainIndex <- createDataPartition(diabetes_data$diabetes, p = 0.8, list = FALSE)
+trainData <- diabetes_data[trainIndex, ]
+testData <- diabetes_data[-trainIndex, ]
+```
+
+
+### Cross Validation
+
+```{r}
+cv_control <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 10
+)
+```
+
+
+## Model Training
+
+### Logistic Regression Model
+
+```{r}
+set.seed(123)
+logistic_model <- train(
+  diabetes ~ ., 
+  data = trainData, 
+  method = "glm", 
+  family = binomial(), 
+  trControl = cv_control
+)
+summary(logistic_model)
+
+# The logistic regression model provides to access the correlations between different variables and diabetes. Based on the summary output, age, hypertension, bmi, HbA1c_level, and blood_glucose_level all have p-values less than 0.05 which tells us these are all significant predictors of diabetes. 
+```
+
+
+### Classification Tree Model
+
+```{r}
+set.seed(123)
+tree_model <- train(
+  diabetes ~ ., 
+  data = trainData, 
+  method = "rpart",
+  trControl = cv_control
+)
+print(tree_model)
+
+# This classification and regression tree model selected a final model with the highest accuracy of 86.51% which tells us this model is a strong indicator of predicting diabetes. 
+```
+
+
+### Random Forest Model
+
+```{r}
+set.seed(123)
+rf_model <- train(
+  diabetes ~ ., 
+  data = trainData, 
+  method = "rf",
+  trControl = cv_control
+)
+print(rf_model)
+
+# This random forest model selected a final model with an accuracy of 88.44% which indicates a strong ability to predict diabetes. The Kappa value of this model is 0.75 which tells us there is a high performance of this model. The recommended number of variables in each tree is 2. 
+```
+
+
+### Random Forest Variable Importance
+
+```{r}
+varImp_rf <- varImp(rf_model)
+plot(varImp_rf, main = "Variable Importance: Random Forest")
+
+# Based on the plot showing the importance of different variables on the random forest model, we can see HbA1c_level, blood_glucose_level, and age have the highest importance for the model. 
+```
+
+
+## Model Evaluation
+
+### Predictions
+
+```{r}
+logistic_preds <- predict(logistic_model, testData)
+tree_preds <- predict(tree_model, testData)
+rf_preds <- predict(rf_model, testData)
+```
+
+
+### Confusion Matrixs
+
+```{r}
+logistic_cm <- confusionMatrix(logistic_preds, testData$diabetes, positive = "1")
+tree_cm <- confusionMatrix(tree_preds, testData$diabetes, positive = "1")
+rf_cm <- confusionMatrix(rf_preds, testData$diabetes, positive = "1")
+
+logistic_cm
+tree_cm
+rf_cm
+```
+
+
+## Model Comparison
+
+```{r}
+model_metrics <- data.frame(
+  Model = c("Logistic Regression", "CART", "Random Forest"),
+  Accuracy = c(logistic_cm$overall["Accuracy"], tree_cm$overall["Accuracy"], rf_cm$overall["Accuracy"]),
+  Sensitivity = c(logistic_cm$byClass["Sensitivity"], tree_cm$byClass["Sensitivity"], rf_cm$byClass["Sensitivity"]),
+  Specificity = c(logistic_cm$byClass["Specificity"], tree_cm$byClass["Specificity"], rf_cm$byClass["Specificity"])
+)
+
+metrics_long <- pivot_longer(model_metrics, cols = Accuracy:Specificity, 
+                             names_to = "Metric", values_to = "Value")
+
+ggplot(metrics_long, aes(x = Model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Model Performance Comparison", 
+       y = "Metric Value", x = "Model") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Logistic Regression is the best in terms of accuracy and sensitivity but the Classification model is the best in terms of specificity. The HbA1c levels and blood glucose levels were consistently important predictors across all models.
+```
+
+
+
+## Interactive Dashboard
+
+```{r}
+
+ui <- fluidPage(
+  theme = shinytheme("flatly"),
+  titlePanel("Diabetes Prediction"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      tabsetPanel(id = "tabs", 
+                  tabPanel(title = "Main Dashboard",
+                      
+                  ),
+                  tabPanel(title = "Prediction Inputs", 
+                           selectInput("gender", "Gender:", choices = unique(diabetes_data$gender)),
+                           sliderInput("age", "Age:", min = 0, max = 80, value = 50),
+                           selectInput("hypertension", "Hypertension:", choices = c("Yes" = 1, "No" = 0)),
+                           selectInput("heart_disease", "Heart Disease:", choices = c("Yes" = 1, "No" = 0)),
+                           selectInput("smoking_history", "Smoking History:", choices = unique(diabetes_data$smoking_history)),
+                           sliderInput("bmi", "Body Mass Index:", min = 11.95, max = 62.99, value = 20),
+                           sliderInput("HbA1c_level", "HbA1c Level:", min = 3.5, max = 9.0, value = 5),
+                           sliderInput("blood_glucose_level", "Blood Glucose Level:", min = 80, max = 300, value = 80)
+                  )
+      )
+    ),
+    
+    mainPanel(
+      tabsetPanel(id = "main_tabs", 
+                  tabPanel(title = "Main Dashboard", 
+                           h3("Correlation Analysis Between Factors and Readmission"),
+                           fluidRow(
+                             column(6, plotOutput(outputId = "scatter_plot")),
+                             column(6, plotOutput(outputId = "violin_plot"))
+                           ),
+                           fluidRow(
+                             column(6, plotOutput(outputId = "smoking_by_diabetes")),
+                             column(6, plotOutput(outputId = "heart_disease_by_diabetes"))
+                           ),
+                           fluidRow(
+                             column(6, plotOutput(outputId = "age_distrubution")), 
+                             column(6, plotOutput(outputId = "hypertension_by_gender"))
+                           ),
+                           fluidRow(
+                             column(6, plotOutput(outputId = "correlation_map")), 
+                             column(6, plotOutput(outputId = "model_performance"))
+                           )
+                  ),
+                  tabPanel(title = "Prediction Model", 
+                           h3("Predicted Readmission Probability"),
+                           textOutput("prediction"),
+                           br(),
+                           plotOutput("input_summary")
+                  )
+      )
+    )
+  )
+)
+
+
+server <- function(input, output) {
+  
+  output$scatter_plot <- renderPlot({
+    ggplot(diabetes_data, aes(x = bmi, y = HbA1c_level)) + 
+      geom_point(aes(color = diabetes), alpha = 0.7) + 
+      geom_smooth(method = "lm", color = "black", linetype = "solid", se = FALSE) + 
+      labs(title = "Scatterplot of BMI vs HbA1c Level by Diabetes Status", x = "BMI", y = "HbA1c Level") +
+      scale_color_manual(values = c("0" = "#b0bec5", "1" = "#4db6ac"), labels = c("No Diabetes", "Diabetes")) + 
+      facet_wrap(~ diabetes, scales = "free_y") + 
+      theme_minimal() +
+      theme(legend.position = "top")
+  })
+  
+  output$violin_plot <- renderPlot({
+    ggplot(diabetes_data, aes(x = factor(diabetes), y = blood_glucose_level, fill = factor(diabetes))) + 
+      geom_violin(trim = FALSE, alpha = 0.7) + 
+      labs(title = "Violin Plot of Blood Glucose Level by Diabetes", x = "Diabetes", y = "Blood Glucose Level") +
+      scale_fill_manual(values = c("0" = "#d1c700", "1" = "#00bcd4"), labels = c("No Diabetes", "Diabetes")) + 
+      theme_minimal() +
+      theme(legend.position = "none")
+  })
+  
+  output$smoking_by_diabetes <- renderPlot({
+    ggplot(diabetes_data, aes(x = smoking_history, fill = factor(diabetes))) +
+      geom_bar(position = "dodge") +
+      labs(title = "Smoking History by Diabetes Status", x = "Smoking History", y = "Count", fill = "Diabetes Status") +
+      scale_fill_manual(values = c("#d1c700", "#00bcd4"), labels = c("No Diabetes", "Diabetes")) +
+      theme_minimal() +
+      theme(legend.position = "top")
+})
+  
+  output$heart_disease_by_diabetes <- renderPlot({
+    ggplot(diabetes_data, aes(x = factor(heart_disease, levels = c(0, 1), labels = c("No Heart Disease", "Heart Disease")), 
+                            fill = factor(diabetes, levels = c(0, 1), labels = c("No Diabetes", "Diabetes")))) +
+      geom_bar(position = "fill", alpha = 0.8) +
+      labs(title = "Proportion of Diabetes by Heart Disease Status", 
+         x = "Heart Disease Status", 
+         y = "Proportion", 
+         fill = "Diabetes Status") +
+      scale_fill_manual(values = c("#b0bec5", "#4db6ac")) +
+      theme_minimal() +
+      theme(legend.position = "top")
+  })
+  
+  
+  output$age_distrubution <- renderPlot({
+    ggplot(diabetes_data, aes(x = age)) + 
+      geom_histogram(binwidth = 5, fill = "#00bcd4", color = "black", alpha = 0.7) + 
+      labs(title = "Distribution of Age in the Diabetes Dataset", x = "Age", y = "Frequency") + 
+      theme_minimal()
+  })
+  
+  output$hypertension_by_gender <- renderPlot({
+    ggplot(diabetes_data, aes(x = gender, fill = factor(hypertension, levels = c(0, 1), labels = c("No", "Yes")))) +
+      geom_bar(position = "dodge") +
+      labs(title = "Gender vs Hypertension Status", x = "Gender", y = "Count", fill = "Hypertension Status") +
+      theme_minimal() +
+      scale_fill_manual(values = c("#d1c700", "#00bcd4")) +
+      theme(legend.position = "top")
+  })
+  
+  output$correlation_map <- renderPlot({
+    
+    numeric_columns <- diabetes_data[, sapply(diabetes_data, is.numeric)]
+    cor_matrix <- cor(numeric_columns, use = "complete.obs")
+    
+    cor_matrix <- cor(diabetes_data %>% select_if(is.numeric)) 
+    cor_melt <- melt(cor_matrix)
+    
+    ggplot(cor_melt, aes(x = Var1, y = Var2, fill = value)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "#54a1a1", mid = "white", high = "#4db6ac") +
+      theme_minimal() +
+      labs(title = "Correlation Heatmap", x = NULL, y = NULL) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  })
+  
+  
+  output$model_performance <- renderPlot({
+    model_metrics <- data.frame(
+      Model = c("Logistic Regression", "CART", "Random Forest"),
+      Accuracy = c(logistic_cm$overall["Accuracy"], tree_cm$overall["Accuracy"], rf_cm$overall["Accuracy"]),
+      Sensitivity = c(logistic_cm$byClass["Sensitivity"], tree_cm$byClass["Sensitivity"], rf_cm$byClass["Sensitivity"]),
+      Specificity = c(logistic_cm$byClass["Specificity"], tree_cm$byClass["Specificity"], rf_cm$byClass["Specificity"])
+    )
+
+    metrics_long <- pivot_longer(model_metrics, cols = Accuracy:Specificity, 
+                             names_to = "Metric", values_to = "Value")
+
+    ggplot(metrics_long, aes(x = Model, y = Value, fill = Metric)) + 
+      geom_bar(stat = "identity", position = "dodge") + 
+      labs(title = "Model Performance Comparison", y = "Metric Value", x = "Model") + 
+      scale_fill_manual(values = c("#d1c700", "#b0bec5", "#4db6ac")) +
+      theme_minimal() +
+      theme(legend.position = "top")
+  })
+    
+  
+  
+  
+
+  user_input <- reactive({
+    data.frame(
+      gender = as.factor(input$gender),
+      age = as.numeric(input$age),
+      hypertension = as.factor(input$hypertension),
+      heart_disease = as.factor(input$heart_disease),
+      smoking_history = as.factor(input$smoking_history),
+      bmi = as.numeric(input$bmi),
+      HbA1c_level = as.numeric(input$HbA1c_level),
+      blood_glucose_level = as.numeric(input$blood_glucose_level)
+    )
+  })
+  
+  
+  output$prediction <- renderText({
+    test <- user_input()
+    pred_prob <- predict(rf_model, newdata = test, type = "prob")
+    pred <- pred_prob[,2]
+    paste("The diabetes predictability is:", round(pred * 100, 2), "%")
+    
+  })
+  
+  output$input_summary <- renderPlot({
+    test <- user_input()
+    test_long <- gather(test, key = "Variable", value = "Value")
+    test_long <- test_long[!test_long$Variable %in% c("gender", "hypertension", "heart_disease", "smoking_history"), ]
+    
+
+    custom_labels <- c(
+      "gender" = "Gender",
+      "age" = "Age",
+      "hypertension" = "Hypertension",
+      "heart_disease" = "Heart Disease",
+      "smoking_history" = "Smoking History",
+      "bmi" = "Body Mass Index", 
+      "HbA1c_level" = "HbA1c Level",
+      "blood_glucose_level" = "Blood Glucose Level"
+    )
+    
+    test_long$Custom_Label <- custom_labels[test_long$Variable]
+    
+    ggplot(test_long, aes(x = Custom_Label, y = as.numeric(Value), fill = Variable)) +
+      geom_bar(stat = "identity", show.legend = FALSE) +
+      theme_minimal() +
+      labs(title = "", y = "", x = "") +
+      scale_fill_manual(values = c("#00bcd4", "#b0bec5", "#d1c700", "#4db6ac"))
+  })
+  
+}
+
+shinyApp(ui = ui, server = server)
+
+
+```
+
+
+
+
+
+
